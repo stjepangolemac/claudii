@@ -1,0 +1,274 @@
+#!/bin/bash
+
+set -e
+
+CCD_IMAGE="ccd-dev"
+CCD_CONTAINER_PREFIX="ccd-"
+
+# Check if .ccd directory exists
+check_ccd_dir() {
+    if [[ ! -d ".ccd" ]]; then
+        echo "Error: .ccd directory not found in current directory"
+        exit 1
+    fi
+    
+    if [[ ! -f ".ccd/Dockerfile" ]]; then
+        echo "Error: Dockerfile not found in .ccd directory"
+        exit 1
+    fi
+}
+
+# Build the Docker image
+build_image() {
+    echo "Building Docker image..."
+    docker build -t "$CCD_IMAGE" .ccd/
+    
+    # Save the current Dockerfile hash
+    if command -v md5sum >/dev/null 2>&1; then
+        md5sum .ccd/Dockerfile > .ccd/.dockerfile.hash
+    elif command -v md5 >/dev/null 2>&1; then
+        md5 -q .ccd/Dockerfile > .ccd/.dockerfile.hash
+    fi
+    
+    echo "Docker image built successfully!"
+}
+
+# Check if Dockerfile has changed
+dockerfile_changed() {
+    if [[ ! -f ".ccd/.dockerfile.hash" ]]; then
+        return 0  # No hash file, assume changed
+    fi
+    
+    if command -v md5sum >/dev/null 2>&1; then
+        CURRENT_HASH=$(md5sum .ccd/Dockerfile | awk '{print $1}')
+        SAVED_HASH=$(cat .ccd/.dockerfile.hash | awk '{print $1}')
+    elif command -v md5 >/dev/null 2>&1; then
+        CURRENT_HASH=$(md5 -q .ccd/Dockerfile)
+        SAVED_HASH=$(cat .ccd/.dockerfile.hash)
+    else
+        return 0  # Can't check, assume changed
+    fi
+    
+    if [[ "$CURRENT_HASH" != "$SAVED_HASH" ]]; then
+        return 0  # Changed
+    else
+        return 1  # Not changed
+    fi
+}
+
+# Get Claude credentials from macOS keychain
+get_claude_credentials() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        CLAUDE_CREDS=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || echo "")
+        if [[ -n "$CLAUDE_CREDS" ]]; then
+            echo "$CLAUDE_CREDS"
+        else
+            echo "Warning: Claude Code credentials not found in keychain" >&2
+            echo ""
+        fi
+    else
+        echo "Warning: Credential extraction only supported on macOS" >&2
+        echo ""
+    fi
+}
+
+# Get GitHub OAuth token from macOS keychain
+get_github_token() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        GH_TOKEN_B64=$(security find-generic-password -s "gh:github.com" -w 2>/dev/null || echo "")
+        if [[ -n "$GH_TOKEN_B64" ]]; then
+            # Remove prefix and decode base64
+            echo "$GH_TOKEN_B64" | sed 's/go-keyring-base64://' | base64 -d
+        else
+            echo "Warning: GitHub CLI credentials not found in keychain" >&2
+            echo ""
+        fi
+    else
+        echo "Warning: Credential extraction only supported on macOS" >&2
+        echo ""
+    fi
+}
+
+# Select GitHub repository using fzf
+select_repo() {
+    echo "Fetching your repositories and organizations..." >&2
+    
+    # Get user repos
+    USER_REPOS=$(gh repo list --limit 1000 --json nameWithOwner -q '.[].nameWithOwner' 2>/dev/null || echo "")
+    
+    # Get list of orgs
+    ORGS=$(gh api user/orgs -q '.[].login' 2>/dev/null || echo "")
+    
+    # Get repos from each org
+    ORG_REPOS=""
+    for org in $ORGS; do
+        if [[ -n "$org" ]]; then
+            echo "Fetching repos from $org..." >&2
+            ORG_REPO_LIST=$(gh repo list "$org" --limit 1000 --json nameWithOwner -q '.[].nameWithOwner' 2>/dev/null || echo "")
+            if [[ -n "$ORG_REPO_LIST" ]]; then
+                ORG_REPOS="$ORG_REPOS$ORG_REPO_LIST"$'\n'
+            fi
+        fi
+    done
+    
+    # Combine all repos
+    ALL_REPOS=$(echo -e "$USER_REPOS\n$ORG_REPOS" | grep -v '^$' | sort -u)
+    
+    if [[ -z "$ALL_REPOS" ]]; then
+        echo "Error: No repositories found or gh not authenticated" >&2
+        return 1
+    fi
+    
+    SELECTED_REPO=$(echo "$ALL_REPOS" | fzf --prompt="Select repository: " --height=20 --reverse)
+    if [[ -z "$SELECTED_REPO" ]]; then
+        echo "Error: No repository selected" >&2
+        return 1
+    fi
+    
+    echo "$SELECTED_REPO"
+}
+
+# Prompt for branch name
+get_branch_name() {
+    read -p "Enter new branch name: " BRANCH_NAME
+    if [[ -z "$BRANCH_NAME" ]]; then
+        echo "Error: Branch name cannot be empty" >&2
+        return 1
+    fi
+    echo "$BRANCH_NAME"
+}
+
+# Start a new container
+start_container() {
+    check_ccd_dir
+    
+    # Check for command line arguments
+    local SELECTED_REPO="$1"
+    local BRANCH_NAME="$2"
+    
+    # Check if image exists
+    if ! docker image inspect "$CCD_IMAGE" >/dev/null 2>&1; then
+        echo "Docker image not found. Please run 'ccd build' first."
+        exit 1
+    fi
+    
+    # Generate unique container name
+    CONTAINER_NAME="${CCD_CONTAINER_PREFIX}$(date +%s)"
+    
+    # If no arguments provided, use interactive selection
+    if [[ -z "$SELECTED_REPO" ]]; then
+        echo "Select a repository to work on:"
+        SELECTED_REPO=$(select_repo)
+        if [[ $? -ne 0 ]]; then
+            echo "Repository selection cancelled"
+            return 1
+        fi
+    fi
+    
+    if [[ -z "$BRANCH_NAME" ]]; then
+        echo "Selected repository: $SELECTED_REPO"
+        BRANCH_NAME=$(get_branch_name)
+        if [[ $? -ne 0 ]]; then
+            echo "Branch creation cancelled"
+            return 1
+        fi
+    fi
+    
+    echo "Using repository: $SELECTED_REPO"
+    echo "Using branch: $BRANCH_NAME"
+    
+    # Get credentials
+    CLAUDE_CREDENTIALS=$(get_claude_credentials)
+    GH_TOKEN=$(get_github_token)
+    
+    echo "Starting container: $CONTAINER_NAME"
+    
+    # Generate CLAUDE.md content
+    echo "Generating CLAUDE.md..."
+    CLAUDE_MD_CONTENT=$(.ccd/generate-claude-md.sh 2>/dev/null)
+    if [[ -z "$CLAUDE_MD_CONTENT" ]]; then
+        echo "Warning: Failed to generate CLAUDE.md"
+        CLAUDE_MD_CONTENT="# CCD Environment\n\nDevelopment environment for Claude Code."
+    fi
+    
+    # Get GitHub username from hosts.yml if it exists
+    GH_USER=$(grep -A2 "github.com:" ~/.config/gh/hosts.yml 2>/dev/null | grep "user:" | cut -d' ' -f6 || echo "")
+    
+    # Create hosts.yml content
+    GH_HOSTS_CONTENT=""
+    if [[ -n "$GH_TOKEN" ]]; then
+        GH_HOSTS_CONTENT="github.com:
+    oauth_token: $GH_TOKEN
+    user: ${GH_USER:-unknown}
+    git_protocol: ssh"
+    fi
+    
+    # Run container with environment variables
+    docker run -it --rm --name "$CONTAINER_NAME" \
+        -e "CLAUDE_CREDENTIALS=$CLAUDE_CREDENTIALS" \
+        -e "GH_HOSTS_CONTENT=$GH_HOSTS_CONTENT" \
+        -e "CLAUDE_MD_CONTENT=$CLAUDE_MD_CONTENT" \
+        "$CCD_IMAGE" bootstrap "$SELECTED_REPO" "$BRANCH_NAME"
+    
+    echo "Container stopped"
+}
+
+# Clean up stopped containers
+clean_containers() {
+    echo "Cleaning up CCD containers..."
+    
+    # Get all containers (running and stopped) with CCD prefix
+    CONTAINERS=$(docker ps -a --filter "name=${CCD_CONTAINER_PREFIX}" --format "{{.Names}}" 2>/dev/null || true)
+    
+    if [[ -z "$CONTAINERS" ]]; then
+        echo "No CCD containers found"
+        return
+    fi
+    
+    # Remove containers
+    echo "$CONTAINERS" | xargs docker rm -f 2>/dev/null || true
+    echo "Cleaned up containers: $CONTAINERS"
+}
+
+# Show help
+show_help() {
+    cat << EOF
+CCD - Claude Code Development Container Helper
+
+Usage: $0 <command> [options]
+
+Commands:
+    build                  Build the Docker image
+    start [repo] [branch]  Start a new development container
+                           If repo/branch not provided, interactive selection is used
+                           Example: $0 start mktflare/turbotick feature-branch
+    clean                  Remove all CCD containers
+    help                   Show this help message
+
+The script looks for a .ccd directory with a Dockerfile in the current directory.
+EOF
+}
+
+# Main command handling
+case "${1:-}" in
+    build)
+        check_ccd_dir
+        build_image
+        ;;
+    start)
+        shift  # Remove 'start' from arguments
+        start_container "$@"
+        ;;
+    clean)
+        clean_containers
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Error: Unknown command '${1:-}'"
+        echo
+        show_help
+        exit 1
+        ;;
+esac
