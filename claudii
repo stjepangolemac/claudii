@@ -2,18 +2,18 @@
 
 set -e
 
-CCD_IMAGE="ccd-dev"
-CCD_CONTAINER_PREFIX="ccd-"
+CLAUDII_IMAGE="claudii-dev"
+CLAUDII_CONTAINER_PREFIX="claudii-"
 
-# Check if .ccd directory exists
-check_ccd_dir() {
-    if [[ ! -d ".ccd" ]]; then
-        echo "Error: .ccd directory not found in current directory"
+# Check if .claudii directory exists
+check_claudii_dir() {
+    if [[ ! -d ".claudii" ]]; then
+        echo "Error: .claudii directory not found in current directory"
         exit 1
     fi
     
-    if [[ ! -f ".ccd/Dockerfile" ]]; then
-        echo "Error: Dockerfile not found in .ccd directory"
+    if [[ ! -f ".claudii/Dockerfile" ]]; then
+        echo "Error: Dockerfile not found in .claudii directory"
         exit 1
     fi
 }
@@ -21,13 +21,13 @@ check_ccd_dir() {
 # Build the Docker image
 build_image() {
     echo "Building Docker image..."
-    docker build -t "$CCD_IMAGE" .ccd/
+    docker build -t "$CLAUDII_IMAGE" .claudii/
     
     # Save the current Dockerfile hash
     if command -v md5sum >/dev/null 2>&1; then
-        md5sum .ccd/Dockerfile > .ccd/.dockerfile.hash
+        md5sum .claudii/Dockerfile > .claudii/.dockerfile.hash
     elif command -v md5 >/dev/null 2>&1; then
-        md5 -q .ccd/Dockerfile > .ccd/.dockerfile.hash
+        md5 -q .claudii/Dockerfile > .claudii/.dockerfile.hash
     fi
     
     echo "Docker image built successfully!"
@@ -35,16 +35,16 @@ build_image() {
 
 # Check if Dockerfile has changed
 dockerfile_changed() {
-    if [[ ! -f ".ccd/.dockerfile.hash" ]]; then
+    if [[ ! -f ".claudii/.dockerfile.hash" ]]; then
         return 0  # No hash file, assume changed
     fi
     
     if command -v md5sum >/dev/null 2>&1; then
-        CURRENT_HASH=$(md5sum .ccd/Dockerfile | awk '{print $1}')
-        SAVED_HASH=$(cat .ccd/.dockerfile.hash | awk '{print $1}')
+        CURRENT_HASH=$(md5sum .claudii/Dockerfile | awk '{print $1}')
+        SAVED_HASH=$(cat .claudii/.dockerfile.hash | awk '{print $1}')
     elif command -v md5 >/dev/null 2>&1; then
-        CURRENT_HASH=$(md5 -q .ccd/Dockerfile)
-        SAVED_HASH=$(cat .ccd/.dockerfile.hash)
+        CURRENT_HASH=$(md5 -q .claudii/Dockerfile)
+        SAVED_HASH=$(cat .claudii/.dockerfile.hash)
     else
         return 0  # Can't check, assume changed
     fi
@@ -140,20 +140,20 @@ get_branch_name() {
 
 # Start a new container
 start_container() {
-    check_ccd_dir
+    check_claudii_dir
     
     # Check for command line arguments
     local SELECTED_REPO="$1"
     local BRANCH_NAME="$2"
     
     # Check if image exists
-    if ! docker image inspect "$CCD_IMAGE" >/dev/null 2>&1; then
-        echo "Docker image not found. Please run 'ccd build' first."
+    if ! docker image inspect "$CLAUDII_IMAGE" >/dev/null 2>&1; then
+        echo "Docker image not found. Please run 'claudii build' first."
         exit 1
     fi
     
     # Generate unique container name
-    CONTAINER_NAME="${CCD_CONTAINER_PREFIX}$(date +%s)"
+    CONTAINER_NAME="${CLAUDII_CONTAINER_PREFIX}$(date +%s)"
     
     # If no arguments provided, use interactive selection
     if [[ -z "$SELECTED_REPO" ]]; then
@@ -185,10 +185,10 @@ start_container() {
     
     # Generate CLAUDE.md content
     echo "Generating CLAUDE.md..."
-    CLAUDE_MD_CONTENT=$(.ccd/generate-claude-md.sh 2>/dev/null)
+    CLAUDE_MD_CONTENT=$(.claudii/generate-claude-md.sh 2>/dev/null)
     if [[ -z "$CLAUDE_MD_CONTENT" ]]; then
         echo "Warning: Failed to generate CLAUDE.md"
-        CLAUDE_MD_CONTENT="# CCD Environment\n\nDevelopment environment for Claude Code."
+        CLAUDE_MD_CONTENT="# Claudii Environment\n\nDevelopment environment for Claude Code."
     fi
     
     # Get GitHub username from hosts.yml if it exists
@@ -208,20 +208,20 @@ start_container() {
         -e "CLAUDE_CREDENTIALS=$CLAUDE_CREDENTIALS" \
         -e "GH_HOSTS_CONTENT=$GH_HOSTS_CONTENT" \
         -e "CLAUDE_MD_CONTENT=$CLAUDE_MD_CONTENT" \
-        "$CCD_IMAGE" bootstrap "$SELECTED_REPO" "$BRANCH_NAME"
+        "$CLAUDII_IMAGE" bootstrap "$SELECTED_REPO" "$BRANCH_NAME"
     
     echo "Container stopped"
 }
 
 # Clean up stopped containers
 clean_containers() {
-    echo "Cleaning up CCD containers..."
+    echo "Cleaning up Claudii containers..."
     
-    # Get all containers (running and stopped) with CCD prefix
-    CONTAINERS=$(docker ps -a --filter "name=${CCD_CONTAINER_PREFIX}" --format "{{.Names}}" 2>/dev/null || true)
+    # Get all containers (running and stopped) with Claudii prefix
+    CONTAINERS=$(docker ps -a --filter "name=${CLAUDII_CONTAINER_PREFIX}" --format "{{.Names}}" 2>/dev/null || true)
     
     if [[ -z "$CONTAINERS" ]]; then
-        echo "No CCD containers found"
+        echo "No Claudii containers found"
         return
     fi
     
@@ -233,7 +233,7 @@ clean_containers() {
 # Show help
 show_help() {
     cat << EOF
-CCD - Claude Code Development Container Helper
+Claudii - Claude Code Development Container Helper
 
 Usage: $0 <command> [options]
 
@@ -242,17 +242,17 @@ Commands:
     start [repo] [branch]  Start a new development container
                            If repo/branch not provided, interactive selection is used
                            Example: $0 start mktflare/turbotick feature-branch
-    clean                  Remove all CCD containers
+    clean                  Remove all Claudii containers
     help                   Show this help message
 
-The script looks for a .ccd directory with a Dockerfile in the current directory.
+The script looks for a .claudii directory with a Dockerfile in the current directory.
 EOF
 }
 
 # Main command handling
 case "${1:-}" in
     build)
-        check_ccd_dir
+        check_claudii_dir
         build_image
         ;;
     start)
