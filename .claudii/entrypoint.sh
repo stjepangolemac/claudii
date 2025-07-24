@@ -82,8 +82,12 @@ touch .cloning
     # If clone succeeded, move contents to current directory
     if [ $? -eq 0 ]; then
         # Move all files including hidden ones
-        mv "$TEMP_DIR"/* "$TEMP_DIR"/.* . 2>/dev/null || true
-        rmdir "$TEMP_DIR" 2>/dev/null || true
+        if [ -d "$TEMP_DIR" ]; then
+            shopt -s dotglob
+            mv "$TEMP_DIR"/* . 2>/dev/null || true
+            shopt -u dotglob
+            rmdir "$TEMP_DIR" 2>/dev/null || true
+        fi
         
         # Create and checkout the new branch
         git checkout -b "$BRANCH" --quiet >/dev/null 2>&1
