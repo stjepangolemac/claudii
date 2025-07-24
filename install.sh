@@ -39,15 +39,18 @@ echo -e "✓ Creating directories..."
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$BIN_DIR"
 
-# Copy .claudii directory 
-if [ -d "$SCRIPT_DIR/.claudii" ]; then
-    echo -e "✓ Copying claudii files..."
-    rm -rf "$CONFIG_DIR/.claudii" 2>/dev/null || true
-    cp -r "$SCRIPT_DIR/.claudii" "$CONFIG_DIR/"
-    # Create empty Dockerfiles directory for user
-    mkdir -p "$CONFIG_DIR/Dockerfiles"
+# Create Dockerfiles directory and copy entrypoint.sh
+echo -e "✓ Setting up Dockerfiles directory..."
+mkdir -p "$CONFIG_DIR/Dockerfiles"
+
+# Copy entrypoint.sh if it exists in the repo
+if [ -f "$SCRIPT_DIR/entrypoint.sh" ]; then
+    cp "$SCRIPT_DIR/entrypoint.sh" "$CONFIG_DIR/Dockerfiles/"
+elif [ -f "$SCRIPT_DIR/.claudii/entrypoint.sh" ]; then
+    # For backward compatibility during transition
+    cp "$SCRIPT_DIR/.claudii/entrypoint.sh" "$CONFIG_DIR/Dockerfiles/"
 else
-    echo -e "${RED}✗ Error: .claudii directory not found in $SCRIPT_DIR${NC}"
+    echo -e "${RED}✗ Error: entrypoint.sh not found${NC}"
     exit 1
 fi
 
@@ -127,18 +130,21 @@ echo ""
 echo "Next steps:"
 if [ "$PATH_UPDATED" = true ]; then
     echo "1. Restart your terminal or run: source ~/.${SHELL_NAME}rc"
-    echo "2. Run 'claudii build' to build the default image"
-    echo "3. Run 'claudii start owner/repo branch' to start coding"
+    echo "2. Run 'claudii env-add <name>' to create an environment"
+    echo "3. Run 'claudii build <name>' to build it"
+    echo "4. Run 'claudii start <name> owner/repo branch' to start coding"
 else
-    echo "1. Run 'claudii build' to build the default image"
-    echo "2. Run 'claudii start owner/repo branch' to start coding"
+    echo "1. Run 'claudii env-add <name>' to create an environment"
+    echo "2. Run 'claudii build <name>' to build it"
+    echo "3. Run 'claudii start <name> owner/repo branch' to start coding"
 fi
 
 echo ""
-echo "For environment-specific images:"
-echo "1. Create a Dockerfile at ~/.config/claudii/Dockerfiles/<name>.Dockerfile"
-echo "2. Run 'claudii build <name>' to build it"
-echo "3. Run 'claudii start <name> owner/repo branch' to use it"
+echo "Example:"
+echo "  claudii env-add rust"
+echo "  # Edit ~/.config/claudii/Dockerfiles/rust.Dockerfile to add your tools"
+echo "  claudii build rust"
+echo "  claudii start rust owner/repo new-feature"
 
 echo ""
 echo "To uninstall claudii later, run: claudii uninstall"

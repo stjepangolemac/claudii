@@ -2,7 +2,6 @@
 
 set -e
 
-CLAUDII_IMAGE="claudii-dev"
 CLAUDII_CONTAINER_PREFIX="claudii-"
 
 GLOBAL_CONFIG_DIR="$HOME/.config/claudii"
@@ -12,78 +11,33 @@ DOCKERFILES_DIR="$GLOBAL_CONFIG_DIR/Dockerfiles"
 build_image() {
     local ENV_NAME="$1"
     
-    # If no environment specified, build default with old layering approach
+    # Environment name is required
     if [[ -z "$ENV_NAME" ]]; then
-        echo "Building default environment (ubuntu:24.04)..."
-        BASE_IMAGE="ubuntu:24.04"
-        IMAGE_TAG="$CLAUDII_IMAGE"
-        
-        echo "Generating CLAUDE.md..."
-        if ! "$GLOBAL_CONFIG_DIR/.claudii/generate-claude-md.sh" "$BASE_IMAGE" > "$GLOBAL_CONFIG_DIR/.claudii/CLAUDE.md" 2>/dev/null; then
-            echo "Warning: Could not generate CLAUDE.md (claude CLI not found)"
-            # Create a basic CLAUDE.md
-            cat > "$GLOBAL_CONFIG_DIR/.claudii/CLAUDE.md" << EOF
-# Claudii Development Environment
-
-Base image: $BASE_IMAGE
-
-This environment includes all standard claudii tools:
-- Git and GitHub CLI
-- Claude Code CLI
-- Node.js and npm
-- Text editors (vim, neovim)
-- JSON processor (jq)
-EOF
-        fi
-        
-        echo "Building Docker image: $IMAGE_TAG"
-        # Build from global claudii Dockerfile with the determined base image
-        docker build --build-arg BASE_IMAGE="$BASE_IMAGE" -t "$IMAGE_TAG" "$GLOBAL_CONFIG_DIR/.claudii/"
-    else
-        # Check if environment Dockerfile exists
-        ENV_DOCKERFILE="$DOCKERFILES_DIR/${ENV_NAME}.Dockerfile"
-        if [[ ! -f "$ENV_DOCKERFILE" ]]; then
-            echo "Error: Environment '$ENV_NAME' not found at $ENV_DOCKERFILE"
-            echo "Available environments:"
-            ls -1 "$DOCKERFILES_DIR" 2>/dev/null | grep '\.Dockerfile$' | sed 's/\.Dockerfile$//' | sed 's/^/  - /'
-            exit 1
-        fi
-        
-        echo "Building environment: $ENV_NAME"
-        IMAGE_TAG="claudii-${ENV_NAME}:latest"
-        
-        # First, we need to copy the entrypoint.sh and generate CLAUDE.md
-        echo "Preparing build context..."
-        BUILD_CONTEXT=$(mktemp -d)
-        cp "$ENV_DOCKERFILE" "$BUILD_CONTEXT/Dockerfile"
-        cp "$GLOBAL_CONFIG_DIR/.claudii/entrypoint.sh" "$BUILD_CONTEXT/entrypoint.sh"
-        
-        # Generate CLAUDE.md for this environment
-        echo "Generating CLAUDE.md..."
-        cat > "$BUILD_CONTEXT/CLAUDE.md" << EOF
-# Claudii Development Environment: $ENV_NAME
-
-This environment includes all standard claudii tools:
-- Git and GitHub CLI
-- Claude Code CLI
-- Node.js and npm
-- Text editors (vim, neovim)
-- JSON processor (jq)
-
-Plus any custom tools you've added to your Dockerfile.
-EOF
-        
-        # Build the complete image
-        docker build -t "$IMAGE_TAG" "$BUILD_CONTEXT/"
-        local BUILD_STATUS=$?
-        
-        # Clean up
-        rm -rf "$BUILD_CONTEXT"
-        
-        if [[ $BUILD_STATUS -ne 0 ]]; then
-            echo "Error: Failed to build $ENV_NAME environment"
-            exit 1
-        fi
+        echo "Error: Environment name required"
+        echo "Usage: claudii build <environment>"
+        echo "Available environments:"
+        ls -1 "$DOCKERFILES_DIR" 2>/dev/null | grep '\.Dockerfile$' | sed 's/\.Dockerfile$//' | sed 's/^/  - /'
+        exit 1
+    fi
+    
+    # Check if environment Dockerfile exists
+    ENV_DOCKERFILE="$DOCKERFILES_DIR/${ENV_NAME}.Dockerfile"
+    if [[ ! -f "$ENV_DOCKERFILE" ]]; then
+        echo "Error: Environment '$ENV_NAME' not found at $ENV_DOCKERFILE"
+        echo "Available environments:"
+        ls -1 "$DOCKERFILES_DIR" 2>/dev/null | grep '\.Dockerfile$' | sed 's/\.Dockerfile$//' | sed 's/^/  - /'
+        exit 1
+    fi
+    
+    echo "Building environment: $ENV_NAME"
+    IMAGE_TAG="claudii-${ENV_NAME}:latest"
+    
+    # Build from the Dockerfiles directory with entrypoint.sh
+    docker build -t "$IMAGE_TAG" -f "$ENV_DOCKERFILE" "$DOCKERFILES_DIR/"
+    
+    if [[ $? -ne 0 ]]; then
+        echo "Error: Failed to build $ENV_NAME environment"
+        exit 1
     fi
     
     echo "Docker image built successfully: $IMAGE_TAG"
@@ -192,39 +146,35 @@ start_container() {
     local SELECTED_REPO=""
     local BRANCH_NAME=""
     
-    # Determine if first arg is environment or repo
-    if [[ $# -eq 3 ]]; then
-        # claudii start env repo branch
-        ENV_NAME="$1"
-        SELECTED_REPO="$2"
-        BRANCH_NAME="$3"
-    elif [[ $# -eq 2 ]]; then
-        # claudii start repo branch (use default image)
-        SELECTED_REPO="$1"
-        BRANCH_NAME="$2"
-    elif [[ $# -eq 1 ]]; then
-        # Check if it's an environment name
-        if [[ -f "$DOCKERFILES_DIR/${1}.Dockerfile" ]]; then
-            ENV_NAME="$1"
-        else
-            SELECTED_REPO="$1"
-        fi
+    # Parse arguments: env repo branch
+    if [[ $# -lt 1 ]]; then
+        echo "Error: Environment name required"
+        echo "Usage: claudii start <environment> [repo] [branch]"
+        exit 1
     fi
     
-    # Determine which image to use
-    if [[ -n "$ENV_NAME" ]]; then
-        IMAGE_TO_USE="claudii-${ENV_NAME}:latest"
-    else
-        IMAGE_TO_USE="$CLAUDII_IMAGE"
+    ENV_NAME="$1"
+    
+    # Check if environment exists
+    if [[ ! -f "$DOCKERFILES_DIR/${ENV_NAME}.Dockerfile" ]]; then
+        echo "Error: Environment '$ENV_NAME' not found"
+        echo "Available environments:"
+        ls -1 "$DOCKERFILES_DIR" 2>/dev/null | grep '\.Dockerfile$' | sed 's/\.Dockerfile$//' | sed 's/^/  - /'
+        exit 1
+    fi
+    
+    # Get repo and branch from arguments
+    if [[ $# -ge 2 ]]; then
+        SELECTED_REPO="$2"
+    fi
+    if [[ $# -ge 3 ]]; then
+        BRANCH_NAME="$3"
     fi
     
     # Check if image exists
+    IMAGE_TO_USE="claudii-${ENV_NAME}:latest"
     if ! docker image inspect "$IMAGE_TO_USE" >/dev/null 2>&1; then
-        if [[ -n "$ENV_NAME" ]]; then
-            echo "Docker image not found. Please run 'claudii build $ENV_NAME' first."
-        else
-            echo "Docker image not found. Please run 'claudii build' first."
-        fi
+        echo "Docker image not found. Please run 'claudii build $ENV_NAME' first."
         exit 1
     fi
     
@@ -311,10 +261,9 @@ FROM ubuntu:24.04
 # This section contains essential requirements for claudii to function properly
 
 # Create developer user first
-RUN useradd -m -s /bin/bash developer && \
-    echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+RUN useradd -m -s /bin/bash developer
 
-# Install essential system packages
+# Install essential system packages including sudo
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
     curl \
@@ -327,6 +276,9 @@ RUN apt-get update && \
     neovim \
     jq \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure sudo for developer user
+RUN echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install Node.js from NodeSource (required for Claude Code)
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
@@ -343,6 +295,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | g
 # Switch to developer user
 USER developer
 WORKDIR /home/developer
+
+# Configure npm to install globally in user directory
+ENV NPM_CONFIG_PREFIX=/home/developer/.npm-global
+ENV PATH=$NPM_CONFIG_PREFIX/bin:$PATH
+RUN mkdir -p /home/developer/.npm-global
 
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
@@ -405,7 +362,7 @@ list_environments() {
             echo "  (none - use 'claudii env-add <name>' to create one)"
         fi
     else
-        echo "  (none - run 'claudii build' to set up)"
+        echo "  (none - run 'claudii env-add <name>' to create one)"
     fi
     echo ""
     echo "To create a new environment:"
@@ -497,28 +454,20 @@ Commands:
     env-add <name>                    Generate a new environment Dockerfile
                                       Example: $0 env-add rust
                                       Example: $0 env-add myproject
-    build [environment]               Build a Docker image
-                                      If no environment specified, builds default (ubuntu:24.04)
+    build <environment>               Build a Docker image for an environment
                                       Example: $0 build rust
-    start [environment] repo branch   Start a new development container
-                                      Environment is optional, defaults to base image
+    start <environment> [repo] [branch]   Start a new development container
                                       Example: $0 start rust owner/repo feature-branch
-                                      Example: $0 start owner/repo feature-branch
+                                      Example: $0 start rust (interactive repo selection)
     clean                             Remove all Claudii containers
     uninstall                         Remove claudii from your system
     help                              Show this help message
 
-Environments:
-    Store custom Dockerfiles in: $DOCKERFILES_DIR/
-    Name them: <environment>.Dockerfile (e.g., rust.Dockerfile, python.Dockerfile)
-    
 Workflow:
     1. Create environment: claudii env-add rust
     2. Edit the Dockerfile to add your tools
     3. Build it: claudii build rust
     4. Use it: claudii start rust owner/repo new-feature
-
-Note: Only Ubuntu-based Docker images are supported.
 EOF
 }
 
