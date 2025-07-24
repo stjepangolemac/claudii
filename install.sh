@@ -127,12 +127,18 @@ echo ""
 echo "Next steps:"
 if [ "$PATH_UPDATED" = true ]; then
     echo "1. Restart your terminal or run: source ~/.${SHELL_NAME}rc"
-    echo "2. Run 'claudii build' to build the Docker image"
+    echo "2. Run 'claudii build' to build the default image"
     echo "3. Run 'claudii start owner/repo branch' to start coding"
 else
-    echo "1. Run 'claudii build' to build the Docker image"
+    echo "1. Run 'claudii build' to build the default image"
     echo "2. Run 'claudii start owner/repo branch' to start coding"
 fi
+
+echo ""
+echo "For environment-specific images:"
+echo "1. Create a Dockerfile at ~/.config/claudii/Dockerfiles/<name>.Dockerfile"
+echo "2. Run 'claudii build <name>' to build it"
+echo "3. Run 'claudii start <name> owner/repo branch' to use it"
 
 echo ""
 echo "To uninstall claudii later, run: claudii uninstall"
