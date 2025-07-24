@@ -20,6 +20,13 @@ check_claudii_dir() {
 
 # Build the Docker image
 build_image() {
+    echo "Generating CLAUDE.md from Dockerfile..."
+    .claudii/generate-claude-md.sh > .claudii/CLAUDE.md
+    if [[ $? -ne 0 ]]; then
+        echo "Error: Failed to generate CLAUDE.md"
+        exit 1
+    fi
+    
     echo "Building Docker image..."
     docker build -t "$CLAUDII_IMAGE" .claudii/
     
@@ -70,6 +77,19 @@ get_claude_credentials() {
         echo "Warning: Credential extraction only supported on macOS" >&2
         echo ""
     fi
+}
+
+# Get git user configuration from host
+get_git_config() {
+    GIT_USER_NAME=$(git config --global user.name 2>/dev/null || echo "")
+    GIT_USER_EMAIL=$(git config --global user.email 2>/dev/null || echo "")
+    
+    if [[ -z "$GIT_USER_NAME" || -z "$GIT_USER_EMAIL" ]]; then
+        echo "Warning: Git user configuration not found on host" >&2
+    fi
+    
+    # Use a simpler format for easier parsing
+    echo "${GIT_USER_NAME}|${GIT_USER_EMAIL}"
 }
 
 # Get GitHub OAuth token from macOS keychain
@@ -180,16 +200,9 @@ start_container() {
     # Get credentials
     CLAUDE_CREDENTIALS=$(get_claude_credentials)
     GH_TOKEN=$(get_github_token)
+    GIT_CONFIG_DATA=$(get_git_config)
     
     echo "Starting container: $CONTAINER_NAME"
-    
-    # Generate CLAUDE.md content
-    echo "Generating CLAUDE.md..."
-    CLAUDE_MD_CONTENT=$(.claudii/generate-claude-md.sh 2>/dev/null)
-    if [[ -z "$CLAUDE_MD_CONTENT" ]]; then
-        echo "Warning: Failed to generate CLAUDE.md"
-        CLAUDE_MD_CONTENT="# Claudii Environment\n\nDevelopment environment for Claude Code."
-    fi
     
     # Get GitHub username from hosts.yml if it exists
     GH_USER=$(grep -A2 "github.com:" ~/.config/gh/hosts.yml 2>/dev/null | grep "user:" | cut -d' ' -f6 || echo "")
@@ -200,15 +213,15 @@ start_container() {
         GH_HOSTS_CONTENT="github.com:
     oauth_token: $GH_TOKEN
     user: ${GH_USER:-unknown}
-    git_protocol: ssh"
+    git_protocol: https"
     fi
     
-    # Run container with environment variables
+    # Run container
     docker run -it --rm --name "$CONTAINER_NAME" \
         -e "CLAUDE_CREDENTIALS=$CLAUDE_CREDENTIALS" \
         -e "GH_HOSTS_CONTENT=$GH_HOSTS_CONTENT" \
-        -e "CLAUDE_MD_CONTENT=$CLAUDE_MD_CONTENT" \
-        "$CLAUDII_IMAGE" bootstrap "$SELECTED_REPO" "$BRANCH_NAME"
+        -e "GIT_CONFIG_DATA=$GIT_CONFIG_DATA" \
+        "$CLAUDII_IMAGE" "$SELECTED_REPO" "$BRANCH_NAME"
     
     echo "Container stopped"
 }

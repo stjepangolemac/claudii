@@ -1,6 +1,6 @@
 # Docker build artifacts
-.ccd/.dockerfile.hash
-.ccd/CLAUDE.md
+.claudii/.dockerfile.hash
+.claudii/CLAUDE.md
 
 # macOS
 .DS_Store

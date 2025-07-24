@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     npm \
     jq \
     sudo \
+    neovim \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -29,14 +30,13 @@ RUN useradd -m -s /bin/bash developer && \
 RUN mkdir -p /home/developer/.claude /home/developer/.config/gh /workspace && \
     chown -R developer:developer /home/developer /workspace
 
-# Copy scripts
+# Copy scripts and CLAUDE.md
 COPY entrypoint.sh /entrypoint.sh
-COPY bootstrap.sh /usr/local/bin/bootstrap
-RUN chmod +x /entrypoint.sh /usr/local/bin/bootstrap
+COPY CLAUDE.md /home/developer/.claude/CLAUDE.md
+RUN chmod +x /entrypoint.sh
 
 # Switch to non-root user
 USER developer
 WORKDIR /workspace
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/bin/bash"]
