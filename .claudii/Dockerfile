@@ -36,14 +36,9 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -y \
     || echo "Text editors might already be installed"
 
 # Install Node.js and npm
-# Check if nodejs/npm are already installed, if not install them
-RUN if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then \
-        DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        nodejs \
-        npm \
-        || (curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-            DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs); \
-    fi
+# Always install from NodeSource to ensure we get a modern version
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
 
 # Install JSON processing tools
 RUN DEBIAN_FRONTEND=noninteractive apt-get install -y \
