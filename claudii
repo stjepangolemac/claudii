@@ -21,7 +21,6 @@ init_claudii() {
     cat > .claudii/.gitignore << 'EOF'
 # Build artifacts
 .dockerfile.hash
-entrypoint.sh
 
 # Generated files
 environments/*.CLAUDE.md
@@ -78,13 +77,9 @@ build_image() {
     
     echo "Successfully generated $CLAUDE_MD_PATH"
     
-    # Copy entrypoint.sh to project .claudii if not exists
-    if [[ ! -f ".claudii/entrypoint.sh" ]]; then
-        cp "$GLOBAL_CONFIG_DIR/entrypoint.sh" ".claudii/"
-    fi
-    
-    # Build from project .claudii directory
-    docker build -t "$IMAGE_TAG" -f "$ENV_DOCKERFILE" ".claudii/"
+    # Build from global config directory (where entrypoint.sh lives)
+    # This avoids copying entrypoint.sh to each project
+    docker build -t "$IMAGE_TAG" -f "$ENV_DOCKERFILE" "$GLOBAL_CONFIG_DIR"
     
     if [[ $? -ne 0 ]]; then
         echo "Error: Failed to build $ENV_NAME environment"

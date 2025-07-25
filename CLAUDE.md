@@ -21,8 +21,7 @@ claudii start python owner/repo feature-branch  # Start coding
 ```
 project/.claudii/
 ├── Dockerfiles/<env>.Dockerfile  # Environment definition
-├── environments/<env>.CLAUDE.md  # AI-generated environment docs
-└── entrypoint.sh                # Container init script
+└── environments/<env>.CLAUDE.md  # AI-generated environment docs
 ```
 
 **CLAUDE.md Generation**: During `claudii build`, Claude AI analyzes the Dockerfile to generate comprehensive documentation:
@@ -31,6 +30,8 @@ project/.claudii/
 - Generated markdown saved to `.claudii/environments/<env>.CLAUDE.md`
 - Mounted read-only in container at `/home/developer/.claude/CLAUDE.md`
 - Provides Claude with full context about the development environment
+
+**Build Process**: Docker builds use global config directory as context (where entrypoint.sh lives), avoiding the need to copy files to each project. The Dockerfile is referenced by full path.
 
 ## Commands
 
