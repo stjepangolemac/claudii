@@ -25,7 +25,12 @@ project/.claudii/
 └── entrypoint.sh                # Container init script
 ```
 
-**CLAUDE.md Generation**: During `claudii build`, Claude analyzes the Dockerfile and generates comprehensive documentation about available tools, configurations, and usage tips. This gives Claude full context when working in the container.
+**CLAUDE.md Generation**: During `claudii build`, Claude AI analyzes the Dockerfile to generate comprehensive documentation:
+- Pipes Dockerfile content to Claude: `cat Dockerfile | claude -p "instructions"`
+- Claude extracts: tools/versions, environment variables, paths, configurations
+- Generated markdown saved to `.claudii/environments/<env>.CLAUDE.md`
+- Mounted read-only in container at `/home/developer/.claude/CLAUDE.md`
+- Provides Claude with full context about the development environment
 
 ## Commands
 
