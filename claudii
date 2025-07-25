@@ -249,6 +249,10 @@ start_container() {
     oauth_token: $GH_TOKEN
     user: ${GH_USER:-unknown}
     git_protocol: https"
+    else
+        echo "Error: GitHub CLI token not found"
+        echo "Please authenticate with GitHub CLI: gh auth login"
+        exit 1
     fi
     
     # Check if CLAUDE.md exists for this environment
