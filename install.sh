@@ -39,9 +39,7 @@ echo -e "✓ Creating directories..."
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$BIN_DIR"
 
-# Create Dockerfiles directory
-echo -e "✓ Setting up Dockerfiles directory..."
-mkdir -p "$CONFIG_DIR/Dockerfiles"
+# Note: Dockerfiles are now project-specific in .claudii directories
 
 # Copy entrypoint.sh to config directory (not Dockerfiles)
 if [ -f "$SCRIPT_DIR/entrypoint.sh" ]; then
@@ -139,8 +137,9 @@ fi
 
 echo ""
 echo "Example:"
+echo "  cd your-project"
 echo "  claudii env-add rust"
-echo "  # Edit ~/.config/claudii/Dockerfiles/rust.Dockerfile to add your tools"
+echo "  # Edit .claudii/Dockerfiles/rust.Dockerfile to add your tools"
 echo "  claudii build rust"
 echo "  claudii start rust owner/repo new-feature"
 

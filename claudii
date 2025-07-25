@@ -5,7 +5,34 @@ set -e
 CLAUDII_CONTAINER_PREFIX="claudii-"
 
 GLOBAL_CONFIG_DIR="$HOME/.config/claudii"
-DOCKERFILES_DIR="$GLOBAL_CONFIG_DIR/Dockerfiles"
+
+# Initialize .claudii directories in current directory
+init_claudii() {
+    if [[ -d ".claudii" ]]; then
+        echo ".claudii directory already exists"
+        return 0
+    fi
+    
+    echo "Initializing .claudii in $PWD"
+    mkdir -p .claudii/Dockerfiles
+    mkdir -p .claudii/environments
+    
+    # Create .gitignore
+    cat > .claudii/.gitignore << 'EOF'
+# Build artifacts
+.dockerfile.hash
+entrypoint.sh
+
+# Generated files
+environments/*.CLAUDE.md
+
+# Temporary files
+*.tmp
+*.log
+EOF
+    
+    echo "Created .claudii directories"
+}
 
 # Build the Docker image
 build_image() {
@@ -15,54 +42,49 @@ build_image() {
     if [[ -z "$ENV_NAME" ]]; then
         echo "Error: Environment name required"
         echo "Usage: claudii build <environment>"
-        echo "Available environments:"
-        ls -1 "$DOCKERFILES_DIR" 2>/dev/null | grep '\.Dockerfile$' | sed 's/\.Dockerfile$//' | sed 's/^/  - /'
+        list_environments
+        exit 1
+    fi
+    
+    # Check if .claudii exists in current directory
+    if [[ ! -d ".claudii" ]]; then
+        echo "Error: No .claudii directory found in current directory"
+        echo "Run 'claudii init' to initialize claudii in this directory"
         exit 1
     fi
     
     # Check if environment Dockerfile exists
-    ENV_DOCKERFILE="$DOCKERFILES_DIR/${ENV_NAME}.Dockerfile"
+    ENV_DOCKERFILE=".claudii/Dockerfiles/${ENV_NAME}.Dockerfile"
     if [[ ! -f "$ENV_DOCKERFILE" ]]; then
         echo "Error: Environment '$ENV_NAME' not found at $ENV_DOCKERFILE"
-        echo "Available environments:"
-        ls -1 "$DOCKERFILES_DIR" 2>/dev/null | grep '\.Dockerfile$' | sed 's/\.Dockerfile$//' | sed 's/^/  - /'
+        list_environments
         exit 1
     fi
     
     echo "Building environment: $ENV_NAME"
     IMAGE_TAG="claudii-${ENV_NAME}:latest"
     
-    # Generate CLAUDE.md from the Dockerfile
-    echo "Generating CLAUDE.md from Dockerfile..."
-    CLAUDE_MD_PATH="$GLOBAL_CONFIG_DIR/environments/${ENV_NAME}.CLAUDE.md"
-    mkdir -p "$GLOBAL_CONFIG_DIR/environments"
+    # Generate CLAUDE.md from the Dockerfile using Claude
+    echo "Generating CLAUDE.md from Dockerfile using Claude AI..."
+    CLAUDE_MD_PATH=".claudii/environments/${ENV_NAME}.CLAUDE.md"
+    mkdir -p ".claudii/environments"
     
-    # Extract information from Dockerfile to create CLAUDE.md
-    cat > "$CLAUDE_MD_PATH" << EOF
-# Claudii $ENV_NAME Development Environment
-
-This environment is based on the $ENV_NAME.Dockerfile and includes:
-
-## Core Claudii Tools
-- Git and GitHub CLI (gh)
-- Claude Code CLI
-- Node.js and npm
-- Text editors (vim, neovim)
-- JSON processor (jq)
-
-## Environment-Specific Tools
-EOF
+    # Use Claude to generate comprehensive documentation
+    if ! cat "$ENV_DOCKERFILE" | claude -p "Analyze this Dockerfile and generate a comprehensive CLAUDE.md file for the '$ENV_NAME' environment. Include: 1) A clear title, 2) Description of the environment's purpose, 3) Complete list of ALL installed tools/languages/libraries with versions, 4) Environment variables and paths, 5) Special configurations, 6) Usage tips. Extract info from: base image, all package installations (apt-get, pip, npm, cargo, etc), ENV variables, working directories, user configs. Output ONLY clean markdown content." > "$CLAUDE_MD_PATH" 2>/dev/null; then
+        echo "Error: Failed to generate CLAUDE.md using Claude"
+        echo "Please ensure Claude Code is installed and authenticated"
+        exit 1
+    fi
     
-    # Extract RUN commands from user customization section to document installed tools
-    sed -n '/# ===== USER CUSTOMIZATION SECTION =====/,/# ===== FINAL CONFIGURATION =====/p' "$ENV_DOCKERFILE" | \
-    grep -E '(apt-get install|cargo install|pip install|npm install|RUN.*install)' | \
-    sed 's/^[[:space:]]*//g' | \
-    while IFS= read -r line; do
-        echo "- $line" >> "$CLAUDE_MD_PATH"
-    done
+    echo "Successfully generated $CLAUDE_MD_PATH"
     
-    # Build from the config directory so we can access entrypoint.sh
-    docker build -t "$IMAGE_TAG" -f "$ENV_DOCKERFILE" "$GLOBAL_CONFIG_DIR/"
+    # Copy entrypoint.sh to project .claudii if not exists
+    if [[ ! -f ".claudii/entrypoint.sh" ]]; then
+        cp "$GLOBAL_CONFIG_DIR/entrypoint.sh" ".claudii/"
+    fi
+    
+    # Build from project .claudii directory
+    docker build -t "$IMAGE_TAG" -f "$ENV_DOCKERFILE" ".claudii/"
     
     if [[ $? -ne 0 ]]; then
         echo "Error: Failed to build $ENV_NAME environment"
@@ -184,11 +206,17 @@ start_container() {
     
     ENV_NAME="$1"
     
+    # Check if .claudii exists in current directory
+    if [[ ! -d ".claudii" ]]; then
+        echo "Error: No .claudii directory found in current directory"
+        echo "Run 'claudii init' to initialize claudii in this directory"
+        exit 1
+    fi
+    
     # Check if environment exists
-    if [[ ! -f "$DOCKERFILES_DIR/${ENV_NAME}.Dockerfile" ]]; then
+    if [[ ! -f ".claudii/Dockerfiles/${ENV_NAME}.Dockerfile" ]]; then
         echo "Error: Environment '$ENV_NAME' not found"
-        echo "Available environments:"
-        ls -1 "$DOCKERFILES_DIR" 2>/dev/null | grep '\.Dockerfile$' | sed 's/\.Dockerfile$//' | sed 's/^/  - /'
+        list_environments
         exit 1
     fi
     
@@ -256,7 +284,7 @@ start_container() {
     fi
     
     # Check if CLAUDE.md exists for this environment
-    CLAUDE_MD_PATH="$GLOBAL_CONFIG_DIR/environments/${ENV_NAME}.CLAUDE.md"
+    CLAUDE_MD_PATH=".claudii/environments/${ENV_NAME}.CLAUDE.md"
     CLAUDE_MD_MOUNT=""
     if [[ -f "$CLAUDE_MD_PATH" ]]; then
         CLAUDE_MD_MOUNT="-v $CLAUDE_MD_PATH:/home/developer/.claude/CLAUDE.md:ro"
@@ -293,7 +321,7 @@ clean_containers() {
 # Generate a complete Dockerfile with all claudii requirements
 generate_claudii_dockerfile() {
     local ENV_NAME="$1"
-    local DOCKERFILE="$DOCKERFILES_DIR/${ENV_NAME}.Dockerfile"
+    local DOCKERFILE="$2"
     
     cat > "$DOCKERFILE" << 'EOF'
 FROM ubuntu:24.04
@@ -392,9 +420,15 @@ EOF
 
 # List available environments
 list_environments() {
-    echo "Available environments:"
-    if [[ -d "$DOCKERFILES_DIR" ]]; then
-        local envs=$(ls -1 "$DOCKERFILES_DIR" 2>/dev/null | grep '\.Dockerfile$' | sed 's/\.Dockerfile$//')
+    if [[ ! -d ".claudii" ]]; then
+        echo "No .claudii directory found in current directory"
+        echo "Run 'claudii init' to initialize claudii in this directory"
+        return
+    fi
+    
+    echo "Available environments in .claudii/:"
+    if [[ -d ".claudii/Dockerfiles" ]]; then
+        local envs=$(ls -1 ".claudii/Dockerfiles" 2>/dev/null | grep '\.Dockerfile$' | sed 's/\.Dockerfile$//')
         if [[ -n "$envs" ]]; then
             echo "$envs" | sed 's/^/  - /'
         else
@@ -406,7 +440,8 @@ list_environments() {
     echo ""
     echo "To create a new environment:"
     echo "  1. Run 'claudii env-add <name>'"
-    echo "  2. Run 'claudii build <name>'"
+    echo "  2. Edit .claudii/Dockerfiles/<name>.Dockerfile"
+    echo "  3. Run 'claudii build <name>'"
 }
 
 # Add a new environment
@@ -419,20 +454,38 @@ add_environment() {
         exit 1
     fi
     
+    # Initialize .claudii in current directory if not exists
+    if [[ ! -d ".claudii" ]]; then
+        echo "Initializing .claudii directory in $PWD"
+        mkdir -p .claudii/Dockerfiles
+        mkdir -p .claudii/environments
+        
+        # Create .gitignore
+        cat > .claudii/.gitignore << 'EOF'
+# Build artifacts
+.dockerfile.hash
+entrypoint.sh
+
+# Generated files
+environments/*.CLAUDE.md
+
+# Temporary files
+*.tmp
+*.log
+EOF
+    fi
+    
     # Check if environment already exists
-    if [[ -f "$DOCKERFILES_DIR/${ENV_NAME}.Dockerfile" ]]; then
-        echo "Error: Environment '$ENV_NAME' already exists at $DOCKERFILES_DIR/${ENV_NAME}.Dockerfile"
+    if [[ -f ".claudii/Dockerfiles/${ENV_NAME}.Dockerfile" ]]; then
+        echo "Error: Environment '$ENV_NAME' already exists at .claudii/Dockerfiles/${ENV_NAME}.Dockerfile"
         exit 1
     fi
     
-    # Create Dockerfiles directory if it doesn't exist
-    mkdir -p "$DOCKERFILES_DIR"
-    
     # Generate the complete Dockerfile with all claudii requirements
-    generate_claudii_dockerfile "$ENV_NAME"
+    generate_claudii_dockerfile "$ENV_NAME" ".claudii/Dockerfiles/${ENV_NAME}.Dockerfile"
     
-    echo "Environment '$ENV_NAME' created at $DOCKERFILES_DIR/${ENV_NAME}.Dockerfile"
-    echo "You can now run 'claudii build $ENV_NAME' to build it"
+    echo "Environment '$ENV_NAME' created at .claudii/Dockerfiles/${ENV_NAME}.Dockerfile"
+    echo "Edit the Dockerfile to add your tools, then run 'claudii build $ENV_NAME'"
 }
 
 # Uninstall claudii completely
@@ -489,6 +542,7 @@ Claudii - Claude Code Development Container Helper
 Usage: $0 <command> [options]
 
 Commands:
+    init                              Initialize .claudii in current directory
     list                              List available environments
     env-add <name>                    Generate a new environment Dockerfile
                                       Example: $0 env-add rust
@@ -503,15 +557,21 @@ Commands:
     help                              Show this help message
 
 Workflow:
-    1. Create environment: claudii env-add rust
-    2. Edit the Dockerfile to add your tools
-    3. Build it: claudii build rust
-    4. Use it: claudii start rust owner/repo new-feature
+    1. Initialize: claudii init
+    2. Create environment: claudii env-add rust
+    3. Edit .claudii/Dockerfiles/rust.Dockerfile to add your tools
+    4. Build it: claudii build rust
+    5. Use it: claudii start rust owner/repo new-feature
+    
+Note: All environments are project-specific in .claudii/ directories
 EOF
 }
 
 # Main command handling
 case "${1:-}" in
+    init)
+        init_claudii
+        ;;
     list)
         list_environments
         ;;
