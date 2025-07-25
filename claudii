@@ -32,6 +32,35 @@ build_image() {
     echo "Building environment: $ENV_NAME"
     IMAGE_TAG="claudii-${ENV_NAME}:latest"
     
+    # Generate CLAUDE.md from the Dockerfile
+    echo "Generating CLAUDE.md from Dockerfile..."
+    CLAUDE_MD_PATH="$GLOBAL_CONFIG_DIR/environments/${ENV_NAME}.CLAUDE.md"
+    mkdir -p "$GLOBAL_CONFIG_DIR/environments"
+    
+    # Extract information from Dockerfile to create CLAUDE.md
+    cat > "$CLAUDE_MD_PATH" << EOF
+# Claudii $ENV_NAME Development Environment
+
+This environment is based on the $ENV_NAME.Dockerfile and includes:
+
+## Core Claudii Tools
+- Git and GitHub CLI (gh)
+- Claude Code CLI
+- Node.js and npm
+- Text editors (vim, neovim)
+- JSON processor (jq)
+
+## Environment-Specific Tools
+EOF
+    
+    # Extract RUN commands from user customization section to document installed tools
+    sed -n '/# ===== USER CUSTOMIZATION SECTION =====/,/# ===== FINAL CONFIGURATION =====/p' "$ENV_DOCKERFILE" | \
+    grep -E '(apt-get install|cargo install|pip install|npm install|RUN.*install)' | \
+    sed 's/^[[:space:]]*//g' | \
+    while IFS= read -r line; do
+        echo "- $line" >> "$CLAUDE_MD_PATH"
+    done
+    
     # Build from the Dockerfiles directory with entrypoint.sh
     docker build -t "$IMAGE_TAG" -f "$ENV_DOCKERFILE" "$DOCKERFILES_DIR/"
     
@@ -222,11 +251,19 @@ start_container() {
     git_protocol: https"
     fi
     
+    # Check if CLAUDE.md exists for this environment
+    CLAUDE_MD_PATH="$GLOBAL_CONFIG_DIR/environments/${ENV_NAME}.CLAUDE.md"
+    CLAUDE_MD_MOUNT=""
+    if [[ -f "$CLAUDE_MD_PATH" ]]; then
+        CLAUDE_MD_MOUNT="-v $CLAUDE_MD_PATH:/home/developer/.claude/CLAUDE.md:ro"
+    fi
+    
     # Run container
     docker run -it --rm --name "$CONTAINER_NAME" \
         -e "CLAUDE_CREDENTIALS=$CLAUDE_CREDENTIALS" \
         -e "GH_HOSTS_CONTENT=$GH_HOSTS_CONTENT" \
         -e "GIT_CONFIG_DATA=$GIT_CONFIG_DATA" \
+        $CLAUDE_MD_MOUNT \
         "$IMAGE_TO_USE" "$SELECTED_REPO" "$BRANCH_NAME"
     
     echo "Container stopped"
@@ -340,9 +377,7 @@ RUN mkdir -p /home/developer/.claude /home/developer/.config/gh /home/developer/
 # Copy claudii scripts and configuration (DO NOT MODIFY)
 USER root
 COPY entrypoint.sh /entrypoint.sh
-COPY CLAUDE.md /home/developer/.claude/CLAUDE.md
-RUN chmod +x /entrypoint.sh && \
-    chown developer:developer /home/developer/.claude/CLAUDE.md
+RUN chmod +x /entrypoint.sh
 
 USER developer
 WORKDIR /home/developer/workspace
