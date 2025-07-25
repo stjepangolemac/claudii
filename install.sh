@@ -39,16 +39,14 @@ echo -e "✓ Creating directories..."
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$BIN_DIR"
 
-# Create Dockerfiles directory and copy entrypoint.sh
+# Create Dockerfiles directory
 echo -e "✓ Setting up Dockerfiles directory..."
 mkdir -p "$CONFIG_DIR/Dockerfiles"
 
-# Copy entrypoint.sh if it exists in the repo
+# Copy entrypoint.sh to config directory (not Dockerfiles)
 if [ -f "$SCRIPT_DIR/entrypoint.sh" ]; then
-    cp "$SCRIPT_DIR/entrypoint.sh" "$CONFIG_DIR/Dockerfiles/"
-elif [ -f "$SCRIPT_DIR/.claudii/entrypoint.sh" ]; then
-    # For backward compatibility during transition
-    cp "$SCRIPT_DIR/.claudii/entrypoint.sh" "$CONFIG_DIR/Dockerfiles/"
+    cp "$SCRIPT_DIR/entrypoint.sh" "$CONFIG_DIR/"
+    chmod +x "$CONFIG_DIR/entrypoint.sh"
 else
     echo -e "${RED}✗ Error: entrypoint.sh not found${NC}"
     exit 1

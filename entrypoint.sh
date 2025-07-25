@@ -14,7 +14,7 @@ if [ -n "$CLAUDE_CREDENTIALS" ]; then
             "hasCompletedOnboarding": true,
             "bypassPermissionsModeAccepted": true,
             "projects": {
-                "/workspace/repo": {
+                "/home/developer/workspace/repo": {
                     "hasCompletedProjectOnboarding": true,
                     "hasTrustDialogAccepted": true,
                     "allowedTools": []
@@ -67,8 +67,8 @@ echo "Setting up repository $REPO on branch $BRANCH..."
 gh auth setup-git --with-token >/dev/null 2>&1
 
 # Create the repo directory immediately
-mkdir -p /workspace/repo
-cd /workspace/repo
+mkdir -p /home/developer/workspace/repo
+cd /home/developer/workspace/repo
 
 # Create a flag file to indicate cloning is in progress
 touch .cloning
@@ -104,7 +104,7 @@ touch .cloning
 CLONE_PID=$!
 
 echo ""
-echo "Ready! You're in /workspace/repo"
+echo "Ready! You're in /home/developer/workspace/repo"
 echo "Repository is cloning in the background (PID: $CLONE_PID)"
 echo ""
 

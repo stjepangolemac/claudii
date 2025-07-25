@@ -61,8 +61,8 @@ EOF
         echo "- $line" >> "$CLAUDE_MD_PATH"
     done
     
-    # Build from the Dockerfiles directory with entrypoint.sh
-    docker build -t "$IMAGE_TAG" -f "$ENV_DOCKERFILE" "$DOCKERFILES_DIR/"
+    # Build from the config directory so we can access entrypoint.sh
+    docker build -t "$IMAGE_TAG" -f "$ENV_DOCKERFILE" "$GLOBAL_CONFIG_DIR/"
     
     if [[ $? -ne 0 ]]; then
         echo "Error: Failed to build $ENV_NAME environment"
